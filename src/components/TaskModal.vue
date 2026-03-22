@@ -130,9 +130,9 @@
 
 			<hr class="my-4 border-border-default" />
 
-			<!-- Scheduling -->
+			<!-- Scheduling (all optional) -->
 			<div>
-				<label for="targetDate" class="block mb-1 font-rajdhani font-semibold text-text-secondary">Target Date</label>
+				<label for="targetDate" class="block mb-1 font-rajdhani font-semibold text-text-secondary">Target Date <span class="font-normal text-text-secondary/60 text-xs">(optional)</span></label>
 				<div class="flex items-center gap-2">
 					<input
 						id="targetDate"
@@ -165,22 +165,76 @@
 					</div>
 				</div>
 			</div>
-			<div class="mt-3">
-				<label class="block mb-1 font-rajdhani font-semibold text-text-secondary">Depends On</label>
-				<Multiselect
-					v-model="task.dependsOn"
-					:options="dependsOnOptions"
-					mode="tags"
-					:searchable="true"
-					:close-on-select="false"
-					label="label"
-					value-prop="value"
-					:object="false"
-					placeholder="Select prerequisite tasks"
-				/>
-				<p v-if="valid.dependsOn === false" class="text-app-danger text-sm mt-1">
-					Circular dependency detected — this would create a loop.
-				</p>
+			<hr class="my-4 border-border-default" />
+
+			<!-- Prerequisites -->
+			<div>
+				<div>
+					<input
+						type="checkbox"
+						class="sr-only peer"
+						id="prerequisiteToggle"
+						:checked="hasPrerequisites"
+						@change="handlePrerequisiteToggle"
+					/>
+					<label
+						for="prerequisiteToggle"
+						class="flex items-center justify-center gap-1.5 w-full cursor-pointer px-3 py-2 border-2 rounded font-rajdhani font-semibold transition-colors peer-checked:bg-accent peer-checked:text-text-inverse peer-checked:border-accent border-accent text-accent hover:bg-accent/10"
+					>
+						<Ban :size="14" aria-hidden="true" />
+						Add prerequisites
+					</label>
+				</div>
+				<div
+					class="grid transition-[grid-template-rows] duration-200 ease-out"
+					:style="{ gridTemplateRows: hasPrerequisites ? '1fr' : '0fr' }"
+				>
+					<div class="overflow-hidden">
+						<div v-if="hasPrerequisites" class="mt-2 border border-border-default rounded p-4">
+							<p class="text-text-secondary text-xs font-rajdhani mb-3">
+								Task is blocked until all prerequisites are met
+							</p>
+							<!-- Prerequisite date -->
+							<div>
+								<label for="prerequisiteDate" class="block mb-1 font-rajdhani font-semibold text-text-secondary text-sm">Not before date</label>
+								<div class="flex items-center gap-2">
+									<input
+										id="prerequisiteDate"
+										type="date"
+										v-model="task.prerequisiteDate"
+										:min="todayDate"
+										class="flex-1 border border-border-default bg-surface-base text-text-primary rounded px-3 py-2 font-rajdhani text-sm focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
+									/>
+									<button
+										type="button"
+										@click="task.prerequisiteDate = null"
+										class="px-2 py-2 text-text-secondary hover:text-accent border border-border-default bg-surface-base rounded transition-colors"
+									>
+										<X :size="14" />
+									</button>
+								</div>
+							</div>
+							<!-- Prerequisite tasks -->
+							<div class="mt-3">
+								<label class="block mb-1 font-rajdhani font-semibold text-text-secondary text-sm">Depends on tasks</label>
+								<Multiselect
+									v-model="task.dependsOn"
+									:options="dependsOnOptions"
+									mode="tags"
+									:searchable="true"
+									:close-on-select="false"
+									label="label"
+									value-prop="value"
+									:object="false"
+									placeholder="Select prerequisite tasks"
+								/>
+								<p v-if="valid.dependsOn === false" class="text-app-danger text-sm mt-1">
+									Circular dependency detected — this would create a loop.
+								</p>
+							</div>
+						</div>
+					</div>
+				</div>
 			</div>
 
 			<hr class="my-4 border-border-default" />
@@ -420,6 +474,7 @@ export default {
 				targetDateTime: null,
 				deadline: null,
 				isHardDeadline: false,
+				prerequisiteDate: null,
 				dependsOn: [],
 				score: 0,
 				type: 'userTask',
@@ -433,7 +488,8 @@ export default {
 				dependsOn: null
 			},
 			showRecurrenceDeletePrompt: false,
-			showCatchUpInfo: false
+			showCatchUpInfo: false,
+			showPrerequisites: false
 		}
 	},
 
@@ -502,6 +558,10 @@ export default {
 			return !!this.task.recurrence
 		},
 
+		hasPrerequisites() {
+			return this.showPrerequisites
+		},
+
 		endsMode() {
 			if (!this.task.recurrence) return 'never'
 			if (this.task.recurrence.endDate) return 'date'
@@ -532,8 +592,10 @@ export default {
 
 			if (this.taskToPatch.id) {
 				this.task = this.taskToPatch
+				this.showPrerequisites = !!(this.task.prerequisiteDate || this.task.dependsOn?.length)
 			} else {
 				this.task.id = this.createGuid()
+				this.showPrerequisites = false
 			}
 		},
 
@@ -655,6 +717,14 @@ export default {
 			this.task.recurrence.interval = 1
 			this.task.recurrence.daysOfWeek = []
 			this.task.recurrence.dayOfMonth = 1
+		},
+
+		handlePrerequisiteToggle(e) {
+			this.showPrerequisites = e.target.checked
+			if (!e.target.checked) {
+				this.task.prerequisiteDate = null
+				this.task.dependsOn = []
+			}
 		},
 
 		handleRecurrenceToggle(e) {

@@ -16,7 +16,7 @@ TaskGlitch is a progressive web app for intelligent task scheduling. Users add t
 
 ## Current Version
 
-**0.15.0** — UX & Onboarding complete. Includes onboarding modal, landing page redesign, footer polish, accessibility improvements, and SEO/Open Graph meta tags.
+**0.20.0** — Schedule intelligence & dashboard HUD. Fixes in-progress marker, break preservation, undo completion, early completion preference. Adds dashboard HUD, break editing, schedule finish time adjustment, prerequisite date blocking, and estimation direction.
 
 ## Project Structure
 

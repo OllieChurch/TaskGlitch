@@ -179,6 +179,15 @@
 	100% { background-color: var(--color-surface-hover); }
 }
 
+/* Progress bar breathing glow */
+@keyframes progressGlow {
+	0%, 100% { opacity: 1; }
+	50% { opacity: 0.6; }
+}
+.progress-bar-live {
+	animation: progressGlow 2s ease-in-out infinite;
+}
+
 @tailwind utilities;
 
 /* Multiselect dark theme — override CSS custom properties */

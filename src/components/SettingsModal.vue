@@ -37,6 +37,20 @@
 						/>
 						<div class="w-11 h-6 bg-surface-hover rounded-full peer peer-checked:bg-accent peer-checked:after:translate-x-full after:content-[''] after:absolute after:top-0.5 after:left-[2px] after:bg-text-primary after:rounded-full after:h-5 after:w-5 after:transition-all"></div>
 					</label>
+					<select
+						v-else-if="getOptions(settingsGroup, setting)"
+						:id="setting"
+						v-model="settings[settingsGroup][setting]"
+						class="border border-border-default bg-surface-base text-text-primary rounded px-3 py-1 font-rajdhani focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
+					>
+						<option
+							v-for="opt in getOptions(settingsGroup, setting)"
+							:key="opt.value"
+							:value="opt.value"
+						>
+							{{ opt.label }}
+						</option>
+					</select>
 					<input
 						v-else
 						:id="setting"
@@ -56,7 +70,7 @@
 import { useAppStore } from '@/stores/app'
 import { useTaskActions } from '@/composables/useTaskActions'
 import BaseModal from './ui/BaseModal.vue'
-import { settingLabels } from '@/assets/settingLabels'
+import { settingLabels, settingOptions } from '@/assets/settingLabels'
 
 export default {
 	name: 'SettingsModal',
@@ -89,6 +103,9 @@ export default {
 		},
 		settingLabel(group, setting) {
 			return settingLabels[group]?.[setting] ?? setting
+		},
+		getOptions(group, setting) {
+			return settingOptions[group]?.[setting] ?? null
 		},
 		setUpData() {
 			const excludedGroups = ['display', 'dataManagement']

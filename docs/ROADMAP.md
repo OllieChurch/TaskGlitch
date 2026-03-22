@@ -1,6 +1,6 @@
 # TaskGlitch Roadmap
 
-> Current version: **0.18.0**
+> Current version: **0.20.0**
 > Target: **1.0** release, then continued development toward an AI-ready platform
 
 ## Overview
@@ -66,6 +66,20 @@ TaskGlitch is an intelligent task scheduling app. The path to 1.0 focuses on pol
 | 0.19 | Schedule fixes & enhancements | [x] | [phase-3b/v0.19-schedule-fixes.md](requirements/phase-3b/v0.19-schedule-fixes.md) |
 | 0.19 | UI polish & responsive fixes | [x] | [phase-3b/v0.19-ui-polish.md](requirements/phase-3b/v0.19-ui-polish.md) |
 | 0.19 | Backlog & estimation improvements | [x] | [phase-3b/v0.19-backlog-estimation.md](requirements/phase-3b/v0.19-backlog-estimation.md) |
+
+## Phase 3c: Schedule Intelligence & Dashboard HUD (v0.20)
+
+*Make it smart. Fix schedule behaviours, make the dashboard actionable, and add date-based blocking.*
+
+| Version | Item | Status | Requirements |
+|---------|------|--------|--------------|
+| 0.20 | Schedule engine fixes (in-progress marker, break preservation, undo, early completion) | [x] | |
+| 0.20 | Schedule UI enhancements (add/edit breaks, adjust finish time) | [x] | |
+| 0.20 | Dashboard heads-up display | [x] | |
+| 0.20 | Estimation accuracy direction indicator | [x] | |
+| 0.20 | Prerequisite date blocking | [x] | |
+| 0.20 | Excluded tasks from reschedule suggestions | [x] | |
+| 0.20 | Content updates (GlitchExplained, landing page copy) | [x] | |
 
 ---
 

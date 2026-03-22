@@ -1,5 +1,23 @@
 export const patchNotes = [
 	{
+		version: '0.20.0',
+		changes: [
+			'The in-progress marker now stays on the current task until you complete it — it no longer jumps ahead based on time',
+			'Breaks in your schedule are preserved when you complete a task — they no longer shuffle around on every completion',
+			'New setting: choose whether to reschedule remaining tasks or insert a break when you finish a task early',
+			'Undoing a task completion restores it to its original position and continues time tracking from where you left off',
+			'Tasks removed from the schedule in edit mode are no longer re-suggested on reschedule',
+			'Add new breaks to your schedule in edit mode — they appear at the top so you can drag them into position',
+			'Edit the duration of individual breaks for meals or external commitments',
+			'Adjust your schedule end time — both the schedule boundary and estimated finish are now visible',
+			'Dashboard now shows a heads-up display when a schedule is active: next task, pause/resume controls, and status feed',
+			'Estimation accuracy now shows whether you tend to over or under-estimate based on size band comparisons',
+			'Set a "Starts On" date for tasks — the task is blocked until that date, then automatically becomes available',
+			'Updated the Glitch It landing section with a clear 3-step explanation of how scheduling works',
+			'Refreshed hero copy on the login page'
+		]
+	},
+	{
 		version: '0.19.0',
 		changes: [
 			'Completed tasks older than your retention period (default 90 days) are now automatically archived on login — configure in Profile > Data Management',

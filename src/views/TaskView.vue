@@ -210,8 +210,9 @@ export default {
 
 		blockedCount() {
 			const depBlockedIds = this.store.getDependencyBlockedIds
+			const now = new Date()
 			return this.getPrioritisedTasks.filter(
-				t => t.blocked || depBlockedIds.has(t.id)
+				t => t.blocked || depBlockedIds.has(t.id) || (t.prerequisiteDate && new Date(t.prerequisiteDate) > now)
 			).length
 		},
 
@@ -263,10 +264,11 @@ export default {
 					if (!filters.sizes.includes(task.sizing)) return false
 				}
 
-				// Blocked status (include dependency-blocked)
+				// Blocked status (include dependency-blocked and prerequisite-blocked)
 				if (filters.blocked === 'active' || filters.blocked === 'blocked') {
 					const depBlockedIds = this.store.getDependencyBlockedIds
-					const isBlocked = task.blocked || depBlockedIds.has(task.id)
+					const now = new Date()
+					const isBlocked = task.blocked || depBlockedIds.has(task.id) || (task.prerequisiteDate && new Date(task.prerequisiteDate) > now)
 					if (filters.blocked === 'active' && isBlocked) return false
 					if (filters.blocked === 'blocked' && !isBlocked) return false
 				}

@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 
 export const useAppStore = defineStore('app', {
 	state: () => ({
-		appVersion: '0.19.0',
+		appVersion: '0.20.0',
 		completed: [],
 		tasks: [],
 		taskToPatch: {},
@@ -69,7 +69,8 @@ export const useAppStore = defineStore('app', {
 				veryLong: 120
 			},
 			rescheduling: {
-				maintainFinishTime: true
+				maintainFinishTime: true,
+				onEarlyCompletion: 'reschedule'
 			},
 			breaks: {
 				targetFrequency: 120,
@@ -107,6 +108,7 @@ export const useAppStore = defineStore('app', {
 			text: '',
 			autoDismissMs: 5000
 		},
+		activityFeed: [],
 		pendingScheduleUpdate: null,
 		addTaskTrigger: 0,
 		patchNotesTrigger: 0,
@@ -146,9 +148,12 @@ export const useAppStore = defineStore('app', {
 
 		getPrioritisedTasks() {
 			const depBlockedIds = this.getDependencyBlockedIds
+			const now = new Date()
 			return [...this.getVisibleTasks].sort((a, b) => {
-				const aBlocked = a.blocked || depBlockedIds.has(a.id)
-				const bBlocked = b.blocked || depBlockedIds.has(b.id)
+				const aPrereqBlocked = a.prerequisiteDate && new Date(a.prerequisiteDate) > now
+				const bPrereqBlocked = b.prerequisiteDate && new Date(b.prerequisiteDate) > now
+				const aBlocked = a.blocked || depBlockedIds.has(a.id) || aPrereqBlocked
+				const bBlocked = b.blocked || depBlockedIds.has(b.id) || bPrereqBlocked
 				if (aBlocked && !bBlocked) return 1
 				if (!aBlocked && bBlocked) return -1
 				return a.score - b.score
@@ -287,6 +292,24 @@ export const useAppStore = defineStore('app', {
 
 		hideNotification() {
 			this.notification.visible = false
+		},
+
+		setActivityFeed(feed) {
+			this.activityFeed = feed
+		},
+
+		addActivity(payload) {
+			// Persisted to Firebase — see useTaskActions for the write
+			// This is called from useTaskActions which handles the Firebase write
+			const entry = {
+				id: `act_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+				text: payload.text,
+				icon: payload.icon ?? 'info',
+				timestamp: new Date().toISOString(),
+				seen: false
+			}
+			this.activityFeed.unshift(entry)
+			return entry
 		},
 
 		setPendingScheduleUpdate(task) {
