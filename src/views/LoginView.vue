@@ -11,7 +11,7 @@
 				Task Glitch
 			</h1>
 			<p class="font-rajdhani text-xl text-text-primary max-w-md mx-auto mb-3">
-				Stop juggling. Start shipping.
+				Your tasks, intelligently scheduled.
 			</p>
 			<p class="font-rajdhani text-text-secondary max-w-sm mx-auto mb-0">
 				Intelligent task scheduling that scores your backlog and builds you

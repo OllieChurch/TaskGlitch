@@ -94,12 +94,22 @@ export function useTaskActions() {
 				title: 'Next occurrence created',
 				text: `"${plainTask.name}" will repeat on ${nextLabel}`
 			})
+			const recurActivity = store.addActivity({
+				text: `Recurring task "${plainTask.name}" scheduled for ${nextLabel}`,
+				icon: 'repeat'
+			})
+			saveActivity(recurActivity)
 		}
 
 		await set(listRef, plainTask)
 		removeTask(task, removeFromList)
 		logger.log('moved task: ', plainTask)
 		await rescoreActiveBacklog()
+
+		// Check if completing this task unblocks any dependent tasks
+		if (list === 'completed') {
+			checkDependencyUnblocks(plainTask.id)
+		}
 	}
 
 	async function removeTask(task, list) {
@@ -203,10 +213,15 @@ export function useTaskActions() {
 		const breakLength = store.account.settings?.breaks?.length ?? store.defaultSettings.breaks.length
 		const taskType = store.taskType
 
-		// Exclude manually blocked tasks, then resolve which remaining tasks are
-		// schedulable. A task is schedulable if all unmet deps are also schedulable
-		// in this session (allowing A and B to both be scheduled with A first).
-		const manuallyEligible = tasks.filter(t => !t.blocked)
+		// Exclude manually blocked tasks and tasks with future prerequisite dates,
+		// then resolve which remaining tasks are schedulable. A task is schedulable
+		// if all unmet deps are also schedulable in this session.
+		const now = new Date()
+		const manuallyEligible = tasks.filter(t => {
+			if (t.blocked) return false
+			if (t.prerequisiteDate && new Date(t.prerequisiteDate) > now) return false
+			return true
+		})
 		const completedIds = new Set(store.completed.map(t => t.id))
 		let candidateIds = new Set(manuallyEligible.map(t => t.id))
 
@@ -572,13 +587,17 @@ export function useTaskActions() {
 		logger.log('toggled block:', plainTask)
 	}
 
-	function findTaskToSuggest(availableSpace, excludeIds, categories) {
+	function findTaskToSuggest(availableSpace, excludeIds, categories, excludedTaskIds = []) {
 		const depBlockedIds = store.getDependencyBlockedIds
 		const prioritised = store.getPrioritisedTasks
+		const excludedSet = new Set(excludedTaskIds)
+		const now = new Date()
 
 		return prioritised.find(task => {
 			if (excludeIds.has(task.id)) return false
+			if (excludedSet.has(task.id)) return false
 			if (task.blocked || depBlockedIds.has(task.id)) return false
+			if (task.prerequisiteDate && new Date(task.prerequisiteDate) > now) return false
 			if (task.sizing > availableSpace) return false
 			if (categories?.length > 0 && !categories.includes(task.category)) return false
 			return true
@@ -638,6 +657,11 @@ export function useTaskActions() {
 		}
 
 		logger.log(`Purged ${purgedCount} completed tasks older than ${retentionDays} days`)
+		const purgeActivity = store.addActivity({
+			text: `Archived ${purgedCount} completed task${purgedCount === 1 ? '' : 's'} older than ${retentionDays} days`,
+			icon: 'archive'
+		})
+		saveActivity(purgeActivity)
 		return { purgedCount, retentionDays }
 	}
 
@@ -648,12 +672,182 @@ export function useTaskActions() {
 		const index = schedule.tasks.findIndex(t => t.id === taskId)
 		if (index === -1) return false
 
-		const newSchedule = JSON.parse(JSON.stringify(schedule))
-		newSchedule.tasks.splice(index, 1)
+		const taskType = store.taskType
+		const tasks = JSON.parse(JSON.stringify(schedule.tasks))
+		const prioritised = store.getPrioritisedTasks
+		const settings = store.getAccountSettings
+		const onEarly = settings?.rescheduling?.onEarlyCompletion ?? 'reschedule'
+		const maintainFinish = settings?.rescheduling?.maintainFinishTime ?? true
 
-		await saveScheduleToDatabase(newSchedule)
-		store.setSchedule(newSchedule)
+		// Split into completed and remaining
+		const completedTasks = tasks.filter(t => {
+			const isUserTask = t.type == null || t.type === taskType.userTask
+			// Already completed OR is the task we're completing now
+			return isUserTask && (t.id === taskId || !prioritised.find(x => x.id === t.id))
+		}).map(t => ({
+			...t,
+			completed: true,
+			completedTime: t.time || t.completedTime || new Date().toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit' }),
+			completedDate: t.date || t.completedDate
+		}))
+
+		const completedIds = new Set(completedTasks.map(t => t.id))
+		const remainingItems = tasks.filter(t => !completedIds.has(t.id))
+
+		// Strip trailing break
+		if (remainingItems.length > 0 && remainingItems[remainingItems.length - 1].type === taskType.systemBreak) {
+			remainingItems.pop()
+		}
+
+		// Recalculate times from now
+		const now = new Date()
+		const startDateTime = new Date(schedule.start)
+		const isStartTimeInPast = now > startDateTime
+
+		const calculatedTimes = getScheduleTimes(
+			schedule.start,
+			isStartTimeInPast ? now.toLocaleTimeString() : startDateTime.toLocaleTimeString(),
+			maintainFinish ? new Date(schedule.finish).toLocaleTimeString() : null,
+			maintainFinish ? schedule.finish : null
+		)
+
+		// If user prefers a break on early completion, insert one
+		if (onEarly === 'insertBreak') {
+			const firstRemainingUserTask = remainingItems.find(
+				t => t.type == null || t.type === taskType.userTask
+			)
+			if (firstRemainingUserTask) {
+				// Calculate gap from now to the original next task time
+				const breakLength = settings?.breaks?.length ?? 10
+				const gapBreak = {
+					id: createGuid(),
+					name: 'Break',
+					type: taskType.systemBreak,
+					sizing: breakLength
+				}
+				const insertIdx = remainingItems.indexOf(firstRemainingUserTask)
+				remainingItems.splice(insertIdx, 0, gapBreak)
+			}
+		}
+
+		// Clear stale actualStartTime, set fresh one on first remaining user task
+		remainingItems.forEach(t => { delete t.actualStartTime })
+		const firstRemaining = remainingItems.find(
+			t => t.type == null || t.type === taskType.userTask
+		)
+		if (firstRemaining) {
+			firstRemaining.actualStartTime = now.toISOString()
+		}
+
+		const scheduleDetails = {
+			categoriesToInclude: schedule.categoriesToInclude,
+			tasks: [...completedTasks, ...remainingItems],
+			start: calculatedTimes.start.toString(),
+			finish: calculatedTimes.finish.toString(),
+			includeBreaks: schedule.includeBreaks,
+			paused: schedule.paused || false,
+			pausedAt: schedule.pausedAt || null,
+			excludedTaskIds: schedule.excludedTaskIds || []
+		}
+
+		await saveScheduleToDatabase(scheduleDetails)
+		store.setSchedule(scheduleDetails)
 		return true
+	}
+
+	async function saveActivity(entry) {
+		const db = getDatabase(store.app)
+		const activityRef = ref(db, `activity/${store.user.uid}/${entry.id}`)
+		await set(activityRef, JSON.parse(JSON.stringify(entry)))
+	}
+
+	async function markActivitiesSeen() {
+		const db = getDatabase(store.app)
+		const unseen = store.activityFeed.filter(a => !a.seen)
+		for (const activity of unseen) {
+			activity.seen = true
+			const activityRef = ref(db, `activity/${store.user.uid}/${activity.id}/seen`)
+			await set(activityRef, true)
+		}
+	}
+
+	async function purgeOldActivities() {
+		const db = getDatabase(store.app)
+		const cutoff = new Date()
+		cutoff.setDate(cutoff.getDate() - 30)
+
+		const toPurge = store.activityFeed.filter(a =>
+			a.seen && new Date(a.timestamp) < cutoff
+		)
+
+		for (const activity of toPurge) {
+			const activityRef = ref(db, `activity/${store.user.uid}/${activity.id}`)
+			await remove(activityRef)
+		}
+	}
+
+	function recalculateRemainingTime(remainingTasks) {
+		return remainingTasks.reduce((sum, t) => sum + (t.sizing || 0), 0)
+	}
+
+	function checkDependencyUnblocks(completedTaskId) {
+		// After completing a task, check if any backlog tasks that depended on it
+		// are now fully unblocked (all their dependencies are completed)
+		const completedIds = new Set(store.completed.map(t => t.id))
+		completedIds.add(completedTaskId) // include the just-completed one
+
+		const backlog = store.tasks || []
+		for (const task of backlog) {
+			if (!task.dependsOn?.length) continue
+			if (!task.dependsOn.includes(completedTaskId)) continue
+
+			// This task depended on the one we just completed — check if ALL deps are now met
+			const allMet = task.dependsOn.every(id => completedIds.has(id))
+			if (!allMet) continue
+
+			// Also check prerequisite date isn't still blocking
+			const dateBlocked = task.prerequisiteDate && new Date(task.prerequisiteDate) > new Date()
+			if (dateBlocked) continue
+
+			const activity = store.addActivity({
+				text: `"${task.name}" is now unblocked`,
+				icon: 'unblock'
+			})
+			saveActivity(activity)
+		}
+	}
+
+	function checkPrerequisiteDateUnblocks() {
+		// Check for tasks whose prerequisiteDate has just passed
+		// Only notify once by checking if the date passed within the last 24 hours
+		// and hasn't already been notified (tracked via task.prerequisiteDateNotified)
+		const now = new Date()
+		const oneDayAgo = new Date(now.getTime() - 24 * 60 * 60 * 1000)
+		const backlog = store.tasks || []
+		const db = getDatabase(store.app)
+
+		for (const task of backlog) {
+			if (!task.prerequisiteDate) continue
+			if (task.prerequisiteDateNotified) continue
+
+			const prereqDate = new Date(task.prerequisiteDate)
+			if (prereqDate > now) continue // still in the future
+			if (prereqDate < oneDayAgo) continue // too old, don't spam
+
+			// Check dependency blocking too — only notify if fully unblocked
+			const depBlockedIds = store.getDependencyBlockedIds
+			if (depBlockedIds.has(task.id)) continue
+
+			const activity = store.addActivity({
+				text: `"${task.name}" is now unblocked — start date reached`,
+				icon: 'unblock'
+			})
+			saveActivity(activity)
+
+			// Mark as notified so we don't re-notify
+			const taskRef = ref(db, `tasks/${store.user.uid}/${task.id}/prerequisiteDateNotified`)
+			set(taskRef, true)
+		}
 	}
 
 	return {
@@ -681,6 +875,11 @@ export function useTaskActions() {
 		calculateNextOccurrence,
 		shouldCreateNextInstance,
 		getMissedOccurrences,
-		buildRecurringInstance
+		buildRecurringInstance,
+		recalculateRemainingTime,
+		saveActivity,
+		markActivitiesSeen,
+		purgeOldActivities,
+		checkPrerequisiteDateUnblocks
 	}
 }

@@ -1,27 +1,46 @@
 <template>
-	<div>
-		<div class="mb-4">
-			<div class="flex justify-center sm:justify-start mb-3">
-				<glitch-emblem :size="80" />
+	<div class="flex flex-col items-center justify-center text-center py-8">
+		<div class="mb-6">
+			<glitch-emblem :size="96" />
+		</div>
+		<h1 class="mb-2 font-rajdhani font-bold text-3xl text-text-heading">
+			Ready to focus?
+		</h1>
+		<p class="mb-8 font-rajdhani text-text-secondary max-w-sm">
+			Turn your backlog into a focused work session in seconds
+		</p>
+
+		<!-- Steps -->
+		<div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-8 w-full max-w-lg">
+			<div class="depth-panel border border-border-visible rounded-lg p-4">
+				<p class="font-wallpoet text-accent text-sm mb-2">01</p>
+				<p class="font-rajdhani font-semibold text-text-heading text-sm mb-1">Scored & ranked</p>
+				<p class="font-rajdhani text-text-secondary text-xs mb-0">
+					Priority, age, and deadline proximity
+				</p>
 			</div>
-			<h1 class="mb-2 text-center sm:text-left font-rajdhani font-bold text-2xl text-text-heading">
-				Let's get to work!
-			</h1>
-			<p class="mb-0 text-center sm:text-left font-rajdhani text-text-primary">
-				Lorem ipsum dolor sit amet, consectetur adipiscing elit.
-				Nullam a tortor sed enim rutrum molestie in at metus. Proin
-				ac accumsan ipsum, ac pellentesque odio. Aliquam mattis erat
-				tellus.
-			</p>
+			<div class="depth-panel border border-border-visible rounded-lg p-4">
+				<p class="font-wallpoet text-accent text-sm mb-2">02</p>
+				<p class="font-rajdhani font-semibold text-text-heading text-sm mb-1">Scheduled</p>
+				<p class="font-rajdhani text-text-secondary text-xs mb-0">
+					Optimised sessions with built-in breaks
+				</p>
+			</div>
+			<div class="depth-panel border border-border-visible rounded-lg p-4">
+				<p class="font-wallpoet text-accent text-sm mb-2">03</p>
+				<p class="font-rajdhani font-semibold text-text-heading text-sm mb-1">Tracked</p>
+				<p class="font-rajdhani text-text-secondary text-xs mb-0">
+					Complete tasks and sharpen your estimates
+				</p>
+			</div>
 		</div>
-		<div>
-			<button
-				class="btn-themed bg-accent text-text-inverse font-bold py-2 px-4 hover:brightness-110 font-rajdhani transition-all"
-				@click="$emit('createSchedule')"
-			>
-				Glitch It!
-			</button>
-		</div>
+
+		<button
+			class="btn-themed bg-accent text-text-inverse font-bold py-3 px-8 text-lg hover:brightness-110 font-rajdhani transition-all"
+			@click="$emit('createSchedule')"
+		>
+			Glitch It!
+		</button>
 	</div>
 </template>
 

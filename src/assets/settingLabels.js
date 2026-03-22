@@ -1,3 +1,13 @@
+// Dropdown options for string-enum settings
+export const settingOptions = {
+	rescheduling: {
+		onEarlyCompletion: [
+			{ value: 'reschedule', label: 'Reschedule remaining tasks' },
+			{ value: 'insertBreak', label: 'Insert a break' }
+		]
+	}
+}
+
 export const settingLabels = {
 	_groups: {
 		taskLength: 'Task Length',
@@ -11,7 +21,8 @@ export const settingLabels = {
 		veryLong: 'Very long task'
 	},
 	rescheduling: {
-		maintainFinishTime: 'Maintain finish time'
+		maintainFinishTime: 'Maintain finish time',
+		onEarlyCompletion: 'On early completion'
 	},
 	breaks: {
 		targetFrequency: 'Break frequency',

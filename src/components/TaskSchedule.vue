@@ -74,10 +74,23 @@
 								<GripHorizontal :size="16" />
 							</div>
 							<h5
-								class="text-left mb-0 pl-0 pr-2 w-9/12 font-rajdhani font-semibold"
+								class="text-left mb-0 pl-0 font-rajdhani font-semibold flex-1 min-w-0 truncate"
+								:class="task.type === taskType.systemBreak ? 'pr-1' : 'pr-2'"
 							>
 								{{ task.name }}
 							</h5>
+							<div v-if="task.type === taskType.systemBreak" class="flex items-center gap-1 shrink-0">
+								<input
+									type="number"
+									:value="task.sizing"
+									min="5"
+									max="120"
+									step="5"
+									class="w-12 border border-border-default bg-surface-base text-text-primary rounded px-1.5 py-0.5 text-xs font-rajdhani focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
+									@change="updateBreakDuration(task, $event.target.value)"
+								/>
+								<span class="text-[10px] text-text-secondary font-rajdhani">m</span>
+							</div>
 							<div class="w-2/12" v-if="!isSimpleSchedule">
 								<button
 									v-if="!task.completed"
@@ -162,11 +175,37 @@
 				</div>
 			</template>
 		</div>
+		<div v-if="isEditMode" class="mt-3">
+			<button
+				class="w-full btn-themed flex items-center justify-center gap-1.5 px-3 py-3 text-sm font-rajdhani font-semibold bg-surface-hover border border-dashed border-border-visible text-text-secondary hover:border-accent-dim hover:text-text-primary transition-all rounded-lg"
+				@click="addBreak()"
+			>
+				<Plus :size="14" />
+				Add Break
+			</button>
+		</div>
 		<div class="mt-3 depth-panel depth-highlight p-3 rounded-lg border border-border-visible">
-			<h5 class="mb-0 font-rajdhani font-semibold text-text-heading">
-				Estimated Finish Time
-				{{ scheduleDetails.estimatedFinishTime }}
-			</h5>
+			<div class="flex items-center" :class="isEditMode ? 'justify-between' : 'justify-center'">
+				<h5 class="mb-0 font-rajdhani font-semibold text-text-heading">
+					Estimated Finish
+					{{ scheduleDetails.estimatedFinishTime }}
+				</h5>
+			</div>
+			<div v-if="scheduleEndTime && isEditMode" class="flex items-center justify-between mt-2 pt-2 border-t border-border-default">
+				<span class="font-rajdhani text-sm text-text-secondary">
+					Schedule ends at
+				</span>
+				<input
+					v-if="isEditMode"
+					type="time"
+					:value="scheduleEndTime"
+					class="border border-border-default bg-surface-base text-text-primary rounded px-2 py-0.5 text-sm font-rajdhani focus:outline-none focus:ring-2 focus:ring-accent focus:border-accent"
+					@change="updateFinishTime($event.target.value)"
+				/>
+				<span v-else class="font-rajdhani text-sm text-text-heading font-semibold">
+					{{ scheduleEndTimeFormatted }}
+				</span>
+			</div>
 		</div>
 		<div v-if="scheduleDetails.isOverflowing" class="mt-2 p-3 bg-amber-900/30 border border-amber-600 rounded-lg text-left">
 			<p class="font-rajdhani font-semibold text-amber-300 mb-0">
@@ -181,17 +220,17 @@ import { useAppStore } from '@/stores/app'
 import { useTaskActions } from '@/composables/useTaskActions'
 import { logger } from '@/utils/logger'
 import { VueDraggable } from 'vue-draggable-plus'
-import { GripHorizontal, X, Undo2, CheckCircle2, AlertTriangle } from 'lucide-vue-next'
+import { GripHorizontal, X, Undo2, CheckCircle2, AlertTriangle, Plus } from 'lucide-vue-next'
 
 export default {
-	components: { VueDraggable, GripHorizontal, X, Undo2, CheckCircle2, AlertTriangle },
+	components: { VueDraggable, GripHorizontal, X, Undo2, CheckCircle2, AlertTriangle, Plus },
 	props: ['isSimpleSchedule'],
 	emits: ['scheduleChanged'],
 
 	setup() {
 		const store = useAppStore()
-		const { moveTask, saveScheduleToDatabase } = useTaskActions()
-		return { store, moveTask, saveScheduleToDatabase }
+		const { moveTask, saveScheduleToDatabase, createGuid } = useTaskActions()
+		return { store, moveTask, saveScheduleToDatabase, createGuid }
 	},
 
 	data() {
@@ -242,54 +281,32 @@ export default {
 					}
 				})
 
-				// Determine active task: first non-completed user task whose slot is current.
-				// After a reschedule, completed tasks without stored times still occupy early
-				// slots, pushing remaining tasks into future slots that "now" hasn't reached yet.
-				// In that case, fall back to the first non-completed user task.
+				// Determine active task: the first non-completed user task in the schedule.
+				// The marker stays on the current task until it's actually completed,
+				// regardless of whether the time slot has elapsed.
 				if (scheduleStarted && !isPaused) {
-					let slotTime = new Date(startDateTime)
-					let hasCompletedInSlots = false
-
-					for (const task of schedule.tasks) {
-						if (task.completed && task.completedTime) {
-							// Completed with stored time — doesn't consume schedule slots
-							continue
-						}
-
-						if (task.completed) {
-							hasCompletedInSlots = true
-						}
-
-						const isUserTask = task.type == null || task.type === this.taskType.userTask
-						const slotEnd = new Date(slotTime.getTime() + task.sizing * 60000)
-
-						if (!activeTaskId && isUserTask && !task.completed && now >= slotTime && now < slotEnd) {
-							activeTaskId = task.id
-						}
-
-						slotTime = new Date(slotTime.getTime() + task.sizing * 60000)
-					}
-
-					// Fallback: only when completed tasks occupy early slots (pushing remaining
-					// tasks into future slots that "now" hasn't reached). Without completed tasks
-					// in slots, no match means the schedule has overrun — no task should be active.
-					if (!activeTaskId && hasCompletedInSlots) {
-						const firstRemaining = schedule.tasks.find(
-							t => !t.completed && (t.type == null || t.type === this.taskType.userTask)
-						)
-						if (firstRemaining) {
-							activeTaskId = firstRemaining.id
-						}
+					const firstRemaining = schedule.tasks.find(
+						t => !t.completed && (t.type == null || t.type === this.taskType.userTask)
+					)
+					if (firstRemaining) {
+						activeTaskId = firstRemaining.id
 					}
 				}
 
+				let usedActualStart = false
 				schedule.tasks.forEach(task => {
 					if (task.completed && task.completedTime) {
 						// Completed task with stored time — preserve it
 						task.time = task.completedTime
 						task.date = task.completedDate || taskTime.toDateString()
 					} else {
-						// Remaining task (or completed without stored time) — calculate from schedule start
+						// Only the first non-completed task with actualStartTime
+						// resets the clock — prevents stale values on later tasks
+						if (!usedActualStart && task.actualStartTime) {
+							taskTime = new Date(task.actualStartTime)
+							usedActualStart = true
+						}
+
 						task.time = taskTime.toLocaleTimeString([], {
 							timeStyle: 'short'
 						})
@@ -337,6 +354,19 @@ export default {
 			return this.store.taskType
 		},
 
+		scheduleEndTime() {
+			if (!this.store.schedule?.finish) return null
+			const finish = new Date(this.store.schedule.finish)
+			const hours = finish.getHours().toString().padStart(2, '0')
+			const mins = finish.getMinutes().toString().padStart(2, '0')
+			return `${hours}:${mins}`
+		},
+
+		scheduleEndTimeFormatted() {
+			if (!this.store.schedule?.finish) return ''
+			return new Date(this.store.schedule.finish).toLocaleTimeString([], { timeStyle: 'short' })
+		},
+
 		hasCompletedTasks() {
 			if (!this.scheduleDetails?.tasks) return false
 			return this.scheduleDetails.tasks.some(t =>
@@ -372,6 +402,9 @@ export default {
 					// Record end time on the completing task
 					const scheduleTask = this.scheduleDetails.tasks.find(x => x.id === task.id)
 					if (scheduleTask) {
+						// Snapshot original start time so undo can restore it
+						scheduleTask.originalStartTime = scheduleTask.actualStartTime
+
 						scheduleTask.actualEndTime = now
 						if (scheduleTask.actualStartTime) {
 							scheduleTask.actualDuration = Math.round(
@@ -398,11 +431,24 @@ export default {
 					// Persist timing data to schedule in Firebase
 					this.updateSchedule(this.scheduleDetails)
 
-					// Notify parent to auto-reschedule
-					this.$emit('scheduleChanged')
+					// Notify parent to auto-reschedule, passing the just-completed task ID
+					this.$emit('scheduleChanged', { completedTaskId: task.id })
 				} else {
-					// Undoing a completion — also needs reschedule
-					this.$emit('scheduleChanged')
+					// Undoing a completion — restore task to its original position
+					// instead of triggering a full reschedule
+					const scheduleTask = this.scheduleDetails.tasks.find(x => x.id === task.id)
+					if (scheduleTask) {
+						// Restore original start time and clear completion timing
+						scheduleTask.actualStartTime = scheduleTask.originalStartTime || scheduleTask.actualStartTime
+						delete scheduleTask.actualEndTime
+						delete scheduleTask.actualDuration
+						delete scheduleTask.completedTime
+						delete scheduleTask.completedDate
+						delete scheduleTask.originalStartTime
+					}
+
+					// Save directly without triggering a full reschedule
+					this.updateSchedule(this.scheduleDetails)
 				}
 
 				const list = task.completed ? 'tasks' : 'completed'
@@ -425,12 +471,62 @@ export default {
 
 			if (taskToRemoveIndex > -1) {
 				newSchedule.tasks.splice(taskToRemoveIndex, 1)
+
+				// Track excluded task IDs so they aren't re-suggested on reschedule
+				if (task.type == null || task.type === this.taskType.userTask) {
+					if (!newSchedule.excludedTaskIds) newSchedule.excludedTaskIds = []
+					newSchedule.excludedTaskIds.push(task.id)
+				}
+
 				this.updateSchedule(newSchedule)
 			}
 		},
 
+		updateFinishTime(timeValue) {
+			if (!timeValue || !this.store.schedule?.finish) return
+			const currentFinish = new Date(this.store.schedule.finish)
+			const [hours, mins] = timeValue.split(':').map(Number)
+			currentFinish.setHours(hours, mins, 0, 0)
+
+			const newSchedule = this.scheduleDetails
+			newSchedule.finish = currentFinish.toISOString()
+			this.updateSchedule(newSchedule)
+		},
+
+		updateBreakDuration(task, value) {
+			const newDuration = Math.max(5, Math.min(120, parseInt(value) || 10))
+			const scheduleTask = this.scheduleDetails.tasks.find(x => x.id === task.id)
+			if (scheduleTask) {
+				scheduleTask.sizing = newDuration
+				this.updateSchedule(this.scheduleDetails)
+			}
+		},
+
+		addBreak() {
+			const breakLength = this.store.getAccountSettings.breaks?.length ?? 10
+			const newBreak = {
+				id: this.createGuid(),
+				name: 'Take a break',
+				sizing: breakLength,
+				type: this.taskType.systemBreak
+			}
+
+			// Clear stale actualStartTime on remaining tasks so times recalculate
+			// correctly with the new break included
+			this.scheduleDetails.tasks.forEach(t => {
+				if (!t.completed) delete t.actualStartTime
+			})
+
+			// Append to end of remaining tasks — user can drag it into position
+			this.scheduleDetails.tasks.push(newBreak)
+			this.updateSchedule(this.scheduleDetails)
+		},
+
 		onDragUpdate() {
-			// After drag reorder, reconstruct full list and save
+			// Clear stale actualStartTime so times recalculate after reorder
+			this.scheduleDetails.tasks.forEach(t => {
+				if (!t.completed) delete t.actualStartTime
+			})
 			this.updateSchedule(this.scheduleDetails)
 		},
 

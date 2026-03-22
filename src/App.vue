@@ -240,6 +240,18 @@ export default {
 				this.store.setSchedule(snapshot.val())
 				this.store.setLoaded('schedule')
 			})
+
+			const activityRef = ref(db, `activity/${this.store.user.uid}`)
+			onValue(activityRef, snapshot => {
+				const data = snapshot.val()
+				if (data) {
+					this.store.setActivityFeed(Object.values(data).sort((a, b) =>
+						new Date(b.timestamp) - new Date(a.timestamp)
+					))
+				} else {
+					this.store.setActivityFeed([])
+				}
+			})
 		},
 
 		redirectToFirstPage() {

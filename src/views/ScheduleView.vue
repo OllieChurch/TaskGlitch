@@ -142,8 +142,8 @@ export default {
 
 	setup() {
 		const store = useAppStore()
-		const { pageCheck, saveScheduleToDatabase, getScheduleTimes, getScheduleTasks, findTaskToSuggest } = useTaskActions()
-		return { store, pageCheck, saveScheduleToDatabase, getScheduleTimes, getScheduleTasks, findTaskToSuggest }
+		const { pageCheck, saveScheduleToDatabase, getScheduleTimes, getScheduleTasks, findTaskToSuggest, recalculateRemainingTime, createGuid } = useTaskActions()
+		return { store, pageCheck, saveScheduleToDatabase, getScheduleTimes, getScheduleTasks, findTaskToSuggest, recalculateRemainingTime, createGuid }
 	},
 
 	data() {
@@ -185,6 +185,10 @@ export default {
 			return (
 				this.getAccountSettings.rescheduling.maintainFinishTime
 			)
+		},
+
+		onEarlyCompletion() {
+			return this.getAccountSettings.rescheduling.onEarlyCompletion ?? 'reschedule'
 		},
 
 		taskType() {
@@ -257,15 +261,18 @@ export default {
 			}
 		},
 
-		reschedule({ clearPause } = {}) {
+		reschedule({ clearPause, justCompletedId } = {}) {
 			this.suggestedTask = null
 
-			// Split current schedule into completed user tasks and remaining user tasks
+			// Split current schedule into completed user tasks and remaining items
+			// (remaining includes both user tasks AND breaks — we preserve breaks)
 			// Snapshot display times on completed tasks so they survive the start time change
+			// Use justCompletedId to identify the task that was just completed
+			// (moveTask may not have synced to Firebase yet)
 			const completedTasks = this.schedule.tasks.filter(
 				t => {
 					const isUserTask = t.type == null || t.type === this.taskType.userTask
-					return isUserTask && !this.getPrioritisedTasks.find(x => x.id === t.id)
+					return isUserTask && (t.id === justCompletedId || !this.getPrioritisedTasks.find(x => x.id === t.id))
 				}
 			).map(t => ({
 				...t,
@@ -273,12 +280,16 @@ export default {
 				completedDate: t.date || t.completedDate
 			}))
 
-			const remainingTasks = this.schedule.tasks.filter(
-				t => {
-					const isUserTask = t.type == null || t.type === this.taskType.userTask
-					return isUserTask && this.getPrioritisedTasks.find(x => x.id === t.id)
-				}
+			// Keep remaining items as-is (user tasks + breaks), preserving order
+			const completedIds = new Set(completedTasks.map(t => t.id))
+			const remainingItems = this.schedule.tasks.filter(
+				t => !completedIds.has(t.id)
 			)
+
+			// Strip trailing break if present
+			if (remainingItems.length > 0 && remainingItems[remainingItems.length - 1].type === this.taskType.systemBreak) {
+				remainingItems.pop()
+			}
 
 			const now = new Date()
 			const startDateTime = new Date(this.schedule.start)
@@ -295,51 +306,51 @@ export default {
 				this.maintainFinish ? this.schedule.finish : null
 			)
 
-			// If all tasks are completed, check if there's space for a suggestion
-			if (remainingTasks.length === 0) {
+			// If no remaining items, check if there's space for a suggestion
+			const remainingUserTasks = remainingItems.filter(
+				t => t.type == null || t.type === this.taskType.userTask
+			)
+			if (remainingUserTasks.length === 0) {
 				this.checkForSuggestion(calculatedTimes.sessionInMins, completedTasks)
 				return
 			}
 
-			// Schedule remaining tasks with fresh breaks
-			const scheduledRemaining = this.getScheduleTasks(
-				remainingTasks,
-				calculatedTimes.sessionInMins,
-				this.schedule.includeBreaks
-			)
-
-			// Check for available space after scheduling remaining tasks
-			const availableSpace = calculatedTimes.sessionInMins - scheduledRemaining.totalTaskTime
+			// Calculate available space using remaining items (tasks + breaks)
+			const remainingTime = this.recalculateRemainingTime(remainingItems)
+			const availableSpace = calculatedTimes.sessionInMins - remainingTime
 			if (availableSpace > 0) {
 				const scheduledIds = new Set([
 					...completedTasks.map(t => t.id),
-					...scheduledRemaining.tasks.map(t => t.id)
+					...remainingItems.map(t => t.id)
 				])
 				const suggestion = this.findTaskToSuggest(
 					availableSpace,
 					scheduledIds,
-					this.schedule.categoriesToInclude
+					this.schedule.categoriesToInclude,
+					this.schedule.excludedTaskIds
 				)
 				this.suggestedTask = suggestion
 			}
 
-			// Set actualStartTime on the first remaining user task
-			const firstRemainingUserTask = scheduledRemaining.tasks.find(
+			// Clear all stale actualStartTime values, then set fresh one on the first remaining user task
+			remainingItems.forEach(t => { delete t.actualStartTime })
+			const firstRemainingUserTask = remainingItems.find(
 				t => t.type == null || t.type === this.taskType.userTask
 			)
 			if (firstRemainingUserTask) {
 				firstRemainingUserTask.actualStartTime = new Date().toISOString()
 			}
 
-			// Concatenate: completed tasks at top, then rescheduled remaining
+			// Concatenate: completed tasks at top, then remaining items (with breaks preserved)
 			const scheduleDetails = {
 				categoriesToInclude: this.schedule.categoriesToInclude,
-				tasks: [...completedTasks, ...scheduledRemaining.tasks],
+				tasks: [...completedTasks, ...remainingItems],
 				start: calculatedTimes.start.toString(),
 				finish: calculatedTimes.finish.toString(),
 				includeBreaks: this.schedule.includeBreaks,
 				paused: clearPause ? false : (this.schedule.paused || false),
-				pausedAt: clearPause ? null : (this.schedule.pausedAt || null)
+				pausedAt: clearPause ? null : (this.schedule.pausedAt || null),
+				excludedTaskIds: this.schedule.excludedTaskIds || []
 			}
 
 			this.saveScheduleToDatabase(scheduleDetails)
@@ -350,7 +361,8 @@ export default {
 			const suggestion = this.findTaskToSuggest(
 				sessionInMins,
 				completedIds,
-				this.schedule.categoriesToInclude
+				this.schedule.categoriesToInclude,
+				this.schedule.excludedTaskIds
 			)
 			this.suggestedTask = suggestion
 		},
@@ -377,12 +389,18 @@ export default {
 			this.$refs.suggestionModalRef?.close()
 		},
 
-		onScheduleChanged() {
+		onScheduleChanged({ completedTaskId } = {}) {
 			// Auto-reschedule after a task is completed or undone
-			// Use nextTick to let the store update from moveTask first
+			// Pass completedTaskId so reschedule can identify the just-completed task
+			// even before moveTask has synced to Firebase
 			this.$nextTick(() => {
 				if (!this.isScheduleComplete) {
-					this.reschedule()
+					// Check if user prefers inserting a break on early completion
+					if (this.onEarlyCompletion === 'insertBreak') {
+						this.rescheduleWithBreak(completedTaskId)
+					} else {
+						this.reschedule({ justCompletedId: completedTaskId })
+					}
 				} else {
 					// All tasks completed — check for suggestion before showing complete screen
 					const now = new Date()
@@ -394,12 +412,89 @@ export default {
 						const suggestion = this.findTaskToSuggest(
 							remainingMins,
 							scheduledIds,
-							this.schedule.categoriesToInclude
+							this.schedule.categoriesToInclude,
+							this.schedule.excludedTaskIds
 						)
 						this.suggestedTask = suggestion
 					}
 				}
 			})
+		},
+
+		rescheduleWithBreak(justCompletedId) {
+			// Instead of shifting remaining tasks to start now, insert a break
+			// to fill the gap between now and the next task's scheduled start time.
+			// If the user completed late (past next task's start), fall back to normal reschedule.
+			const now = new Date()
+			const startDateTime = new Date(this.schedule.start)
+
+			// Find the first non-completed user task to determine its scheduled start
+			let slotTime = new Date(startDateTime)
+			let nextTaskOriginalStart = null
+
+			for (const task of this.schedule.tasks) {
+				if (task.completedTime) continue // completed with snapshot — skip
+				const isUserTask = task.type == null || task.type === this.taskType.userTask
+				const isCompleted = isUserTask && (task.id === justCompletedId || !this.getPrioritisedTasks.find(x => x.id === task.id))
+
+				if (!isCompleted && isUserTask) {
+					nextTaskOriginalStart = new Date(slotTime)
+					break
+				}
+
+				slotTime = new Date(slotTime.getTime() + task.sizing * 60000)
+			}
+
+			// If no next task found or we're already past it, fall back to normal reschedule
+			if (!nextTaskOriginalStart || now >= nextTaskOriginalStart) {
+				this.reschedule({ justCompletedId })
+				return
+			}
+
+			// Calculate gap and insert a break
+			const gapMins = Math.round((nextTaskOriginalStart - now) / 1000 / 60)
+			if (gapMins <= 0) {
+				this.reschedule({ justCompletedId })
+				return
+			}
+
+			// Build the updated schedule: completed tasks (with snapshots), then gap break, then remaining
+			const completedTasks = this.schedule.tasks.filter(
+				t => {
+					const isUserTask = t.type == null || t.type === this.taskType.userTask
+					return isUserTask && (t.id === justCompletedId || !this.getPrioritisedTasks.find(x => x.id === t.id))
+				}
+			).map(t => ({
+				...t,
+				completedTime: t.time || t.completedTime,
+				completedDate: t.date || t.completedDate
+			}))
+
+			const completedIds = new Set(completedTasks.map(t => t.id))
+			const remainingItems = this.schedule.tasks.filter(
+				t => !completedIds.has(t.id)
+			)
+
+			// Insert a gap-filling break at the start of remaining items
+			const gapBreak = {
+				id: this.createGuid(),
+				name: 'Break',
+				sizing: gapMins,
+				type: this.taskType.systemBreak
+			}
+
+			const scheduleDetails = {
+				categoriesToInclude: this.schedule.categoriesToInclude,
+				tasks: [...completedTasks, gapBreak, ...remainingItems],
+				start: this.schedule.start,
+				finish: this.schedule.finish,
+				includeBreaks: this.schedule.includeBreaks,
+				paused: this.schedule.paused || false,
+				pausedAt: this.schedule.pausedAt || null,
+				excludedTaskIds: this.schedule.excludedTaskIds || []
+			}
+
+			this.saveScheduleToDatabase(scheduleDetails)
 		}
 	}
 }
